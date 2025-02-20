@@ -6,8 +6,7 @@ from model.utils import (
 from model.lib.data import (
     get_dataset
 )
-
-
+import pickle
 if __name__ == '__main__':
     results_list, time_list = [], []
     args,default_para,opt_space = get_classical_args()
@@ -25,4 +24,14 @@ if __name__ == '__main__':
 
         results_list.append(vres)
         time_list.append(time_cost)
-    show_results_classical(args,info, metric_name,results_list,time_list)
+    show_results_classical(args, info, metric_name, results_list, time_list)
+
+    with open(f"/u/dbeaglehole/LAMDA-TALENT-rfm/rfm_results/{args.dataset}-{args.model_type}.pkl", "wb") as f:
+        d = {
+            "info": info,
+            "args": args,
+            "results": results_list,
+            "time": time_list,
+            "metric_name": metric_name
+        }
+        pickle.dump(d, f)

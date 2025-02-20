@@ -261,7 +261,8 @@ def get_classical_args():
                         default=default_args['model_type'], 
                         choices=['LogReg', 'NCM', 'RandomForest', 
                                  'xgboost', 'catboost', 'lightgbm',
-                                 'svm','knn', 'NaiveBayes',"dummy","LinearRegression"
+                                 'svm','knn', 'NaiveBayes',"dummy","LinearRegression",
+                                 "rfm"
                                  ])
     
     # optimization parameters 
@@ -511,191 +512,111 @@ def show_results(args,info,metric_name,loss_list,results_list,time_list):
         print("CUDA is unavailable.")
     print('-' * 50)
 
-def tune_hyper_parameters(args,opt_space,train_val_data,info):
+def tune_hyper_parameters(args, opt_space, train_val_data, info):
     """
-    Tune hyper-parameters.
-
-    :args: argparse.Namespace, arguments
-    :opt_space: dict, search space
-    :train_val_data: tuple, training and validation data
-    :info: dict, information about the dataset
-    :return: argparse.Namespace, arguments
+    Tune hyper-parameters with grid search for RFM model and TPE for others.
     """
     import optuna
     import optuna.samplers
-    import optuna.trial
+    from optuna.samplers import GridSampler
+    print("TUNING HYPER-PARAMETERS")
     def objective(trial):
         config = {}
-        try:
-            opt_space[args.model_type]['training']['n_bins'] = [
-                    "int",
-                    2, 
-                    256
-            ]
-        except:
-            opt_space[args.model_type]['fit']['n_bins'] = [
-                    "int",
-                    2, 
-                    256
-            ]
-        merge_sampled_parameters(
-            config, sample_parameters(trial, opt_space[args.model_type], config)
-        )    
-        if args.model_type == 'xgboost' and torch.cuda.is_available():
-            config['model']['tree_method'] = 'gpu_hist' 
-            config['model']['gpu_id'] = args.gpu
-            config['fit']["verbose"] = False
-        elif args.model_type == 'catboost' and torch.cuda.is_available():
-            config['fit']["logging_level"] = "Silent"
-        
-        elif args.model_type == 'RandomForest':
-            config['model']['max_depth'] = 12
+        if args.model_type not in ['rfm']:
+            try:
+                opt_space[args.model_type]['training']['n_bins'] = [
+                        "int",
+                        2, 
+                        256
+                ]
+            except:
+                opt_space[args.model_type]['fit']['n_bins'] = [
+                        "int",
+                        2, 
+                        256
+                ]
             
-        if args.model_type in ['resnet']:
-            config['model']['activation'] = 'relu'
-            config['model']['normalization'] = 'batchnorm'    
+        if args.model_type == 'rfm':
+            # Get parameter values from the trial for grid search
+            for category, params in opt_space['rfm'].items():
+                if category not in config:
+                    config[category] = {}
+                for param_name, param_spec in params.items():
+                    param_type, *param_values = param_spec
+                    param_id = f"{category}.{param_name}"
+                    print("param_type", param_type)
+                    print("param_values", param_values)
+                    print("param_id", param_id)
+                    
+                    if param_type == "float":
+                        config[category][param_name] = trial.suggest_float(param_id, param_values[0], param_values[-1])
+                    elif param_type == "int":
+                        config[category][param_name] = trial.suggest_int(param_id, param_values[0], param_values[-1])
+                    elif param_type == "categorical":
+                        config[category][param_name] = trial.suggest_categorical(param_id, param_values)
+                    elif param_type == "str":
+                        config[category][param_name] = trial.suggest_categorical(param_id, param_values)
 
-        if args.model_type in ['ftt']:
-            config['model'].setdefault('prenormalization', False)
-            config['model'].setdefault('initialization', 'xavier')
-            config['model'].setdefault('activation', 'reglu')
-            config['model'].setdefault('n_heads', 8)
-            config['model'].setdefault('d_token', 64)
-            config['model'].setdefault('token_bias', True)
-            config['model'].setdefault('kv_compression', None)
-            config['model'].setdefault('kv_compression_sharing', None)    
+            # Add n_bins as a fixed value to fit parameters
+            if 'fit' not in config:
+                config['fit'] = {}
+            config['fit']['n_bins'] = 256  # Set to fixed value instead of grid searching
 
-        if args.model_type in ['excelformer']:
-            config['model'].setdefault('prenormalization', False)
-            config['model'].setdefault('kv_compression', None)
-            config['model'].setdefault('kv_compression_sharing', None)  
-            config['model'].setdefault('token_bias', True)
-            config['model'].setdefault('init_scale', 0.01)
-            config['model'].setdefault('n_heads', 8)
+        else:
+            merge_sampled_parameters(
+                config, sample_parameters(trial, opt_space[args.model_type], config)
+            )
 
-        if args.model_type in ["node"]:
-            config["model"].setdefault("choice_function", "sparsemax")
-            config["model"].setdefault("bin_function", "sparsemoid")
-
-        if args.model_type in ['tabr']:
-            config['model']["num_embeddings"].setdefault('type', 'PLREmbeddings')
-            config['model']["num_embeddings"].setdefault('lite', True)
-            config['model'].setdefault('d_multiplier', 2.0)
-            config['model'].setdefault('mixer_normalization', 'auto')
-            config['model'].setdefault('dropout1', 0.0)
-            config['model'].setdefault('normalization', "LayerNorm")
-            config['model'].setdefault('activation', "ReLU")
-        
-        if args.model_type in ['mlp_plr']:
-            config['model']["num_embeddings"].setdefault('type', 'PLREmbeddings')
-            config['model']["num_embeddings"].setdefault('lite', True)
-            
-        if args.model_type in ['ptarl']:
-            config['model']['n_clusters'] = 20
-            config['model']["regularize"]="True"
-            config['general']["diversity"]="True"
-            config['general']["ot_weight"]=0.25
-            config['general']["diversity_weight"]=0.25
-            config['general']["r_weight"]=0.25
-
-        if args.model_type in ['modernNCA','tabm']:
-            config['model']["num_embeddings"].setdefault('type', 'PLREmbeddings')
-            config['model']["num_embeddings"].setdefault('lite', True)
-        
-        if args.model_type in ['tabm']:
-            config['model']['backbone'].setdefault('type' , 'MLP')
-            config['model'].setdefault("arch_type", "tabm")
-            config['model'].setdefault("k", 32)
-        
-        
-        if args.model_type in ['danets']:
-            config['general']['k'] = 5
-            config['general']['virtual_batch_size'] = 256
-        
-        if args.model_type in ['dcn2']:
-            config['model']['stacked'] = False
-
-        if args.model_type in ['grownet']:
-            config["ensemble_model"]["lr"] = 1.0
-            config['model']["sparse"] = False
-            config["training"]['lr_scaler'] = 3
-
-        if args.model_type in ['autoint']:
-            config['model'].setdefault('prenormalization', False)
-            config['model'].setdefault('initialization', 'xavier')
-            config['model'].setdefault('activation', 'relu')
-            config['model'].setdefault('n_heads', 8)
-            config['model'].setdefault('d_token', 64)
-            config['model'].setdefault('kv_compression', None)
-            config['model'].setdefault('kv_compression_sharing', None)
-
-        if args.model_type in ['protogate']:
-            config['training'].setdefault('lam', 1e-3)
-            config['training'].setdefault('pred_coef', 1)
-            config['training'].setdefault('sorting_tau', 16)
-            config['training'].setdefault('feature_selection', True)
-            config['model'].setdefault('a',1)
-            config['model'].setdefault('sigma',0.5)
-        
-        if args.model_type in ['grande']:
-            config['model'].setdefault('from_logits', True)
-            config['model'].setdefault('use_class_weights', True)
-            config['model'].setdefault('bootstrap', False)
-
-        if args.model_type in ['amformer']:
-            config['model'].setdefault('heads', 8)
-            config['model'].setdefault('groups', [54,54,54,54])
-            config['model'].setdefault('sum_num_per_group', [32,16,8,4])
-            config['model'].setdefault("prod_num_per_group", [6,6,6,6])
-            config['model'].setdefault("cluster", True)
-            config['model'].setdefault("target_mode", "mix")
-            config['model'].setdefault("token_descent", False)
-
-        if config.get('config_type') == 'trv4':
-            if config['model']['activation'].endswith('glu'):
-                # This adjustment is needed to keep the number of parameters roughly in the
-                # same range as for non-glu activations
-                config['model']['d_ffn_factor'] *= 2 / 3
+        if args.model_type == 'rfm':
+            config['model'].setdefault('iters', 3)
 
         trial_configs.append(config)
-        # method.fit(train_val_data, info, train=True, config=config)  
-        # run with this config
         try:
             method.fit(train_val_data, info, train=True, config=config)    
             return method.trlog['best_res']
         except Exception as e:
             print(e)
             return 1e9 if info['task_type'] == 'regression' else 0.0
-    
+
     if osp.exists(osp.join(args.save_path, '{}-tuned.json'.format(args.model_type))) and args.retune == False:
         with open(osp.join(args.save_path, '{}-tuned.json'.format(args.model_type)), 'rb') as fp:
             args.config = json.load(fp)
     else:
-        # get data property
-        if info['task_type'] == 'regression':
-            direction = 'minimize'
-            for key in opt_space[args.model_type]['model'].keys():
-                if 'dropout' in key and '?' not in opt_space[args.model_type]['model'][key][0]:
-                    opt_space[args.model_type]['model'][key][0] = '?'+ opt_space[args.model_type]['model'][key][0]
-                    opt_space[args.model_type]['model'][key].insert(1, 0.0)
-        else:
-            direction = 'maximize'  
-        
-        method = get_method(args.model_type)(args, info['task_type'] == 'regression')      
+        direction = 'minimize' if info['task_type'] == 'regression' else 'maximize'
+        print("direction", direction)
+        if args.model_type == 'rfm':
+            # Create grid search space from all values in lists
+            search_space = {}
+            for category, params in opt_space['rfm'].items():
+                for param_name, param_spec in params.items():
+                    param_type, *param_values = param_spec
+                    search_space[f'{category}.{param_name}'] = param_values
 
+            print("Grid Search Space:", search_space)
+            sampler = GridSampler(search_space)
+            n_trials = 1
+            for values in search_space.values():
+                n_trials *= len(values)
+            print(f"Total number of trials to run: {n_trials}")
+        else:
+            sampler = optuna.samplers.TPESampler(seed=0)
+            n_trials = args.n_trials
+
+        method = get_method(args.model_type)(args, info['task_type'] == 'regression')      
         trial_configs = []
+        
         study = optuna.create_study(
-                direction=direction,
-                sampler=optuna.samplers.TPESampler(seed=0),
-            )        
+            direction=direction,
+            sampler=sampler,
+        )
+        
         study.optimize(
             objective,
-            **{'n_trials': args.n_trials},
+            n_trials=n_trials,
             show_progress_bar=True,
-        ) 
-        # get best configs
+        )
+
         best_trial_id = study.best_trial.number
-        # update config files        
         print('Best Hyper-Parameters')
         print(trial_configs[best_trial_id])
         args.config = trial_configs[best_trial_id]
@@ -710,7 +631,10 @@ def get_method(model):
     :model: str, model name
     :return: class, method class
     """
-    if model == "mlp":
+    if model == "rfm":
+        from model.classical_methods.rfm import RFMMethod
+        return RFMMethod
+    elif model == "mlp":
         from model.methods.mlp import MLPMethod
         return MLPMethod
     elif model == 'resnet':
@@ -744,8 +668,7 @@ def get_method(model):
         from model.methods.saint import SaintMethod
         return SaintMethod
     elif model == 'tangos':
-        from model.methods.tangos import TangosMethod
-        return TangosMethod    
+        from model.methods.tangos import TangosMethod    
     elif model == 'snn':
         from model.methods.snn import SNNMethod
         return SNNMethod

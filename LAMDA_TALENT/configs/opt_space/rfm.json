@@ -1,0 +1,25 @@
+{
+    "rfm": {
+        "model": {
+            "bandwidth": [
+                "float", 10, 20, 50, 100, 300, 1000
+            ],
+            "reg": [
+                "float", 1e-6, 1e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 1e-1
+            ],
+            "kernel_type": [
+                "str", "gen_laplace"
+            ],
+            "cat_policy": [
+                "str", "ordinal", "ohe"
+            ],
+            "normalization": [
+                "str", "minmax", "standard", "quantile"
+            ],
+            "exponent": [
+                "float", 1.0, 1.2, 1.4
+            ]
+        },
+        "fit": {}
+    }
+}

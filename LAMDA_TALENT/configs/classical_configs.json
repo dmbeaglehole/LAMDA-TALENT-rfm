@@ -1,6 +1,6 @@
 {
-    "dataset": "Bank_Customer_Churn_Dataset",
-    "model_type": "xgboost",
+    "dataset": "telco-customer-churn",
+    "model_type": "rfm",
     "normalization": "standard",
     "num_nan_policy": "mean",
     "cat_nan_policy": "new",
@@ -11,9 +11,9 @@
     "n_trials": 100,
     "seed_num": 15,
     "gpu": "0",
-    "tune": false,
-    "retune": false,
-    "dataset_path": "data",
+    "tune": true,
+    "retune": true,
+    "dataset_path": "datasets",
     "model_path": "results_model",
     "evaluate_option": "best-val"
 }
