@@ -8,6 +8,7 @@ import numpy as np
 import random
 import json
 import os.path as osp
+from hashlib import md5
 
 
 THIS_PATH = os.path.dirname(__file__)
@@ -179,6 +180,12 @@ def sample_parameters(trial, space, base_config):
     :return: dict, sampled hyper-parameters
     """
     def get_distribution(distribution_name):
+        if distribution_name == 'float':
+            return lambda label, *args: trial.suggest_float(
+                label, 
+                *args, 
+                log=(args[1] / args[0] >= 10)  # Use log scale if range spans order of magnitude
+            )
         return getattr(trial, f'suggest_{distribution_name}')
 
     result = {}
@@ -187,7 +194,21 @@ def sample_parameters(trial, space, base_config):
             result[label] = sample_parameters(trial, subspace, base_config)
         else:
             assert isinstance(subspace, list)
+            
+            # If list has exactly 2 elements, use second element as fixed value
+            if len(subspace) == 2 and subspace[0] == "fixed":
+                result[label] = subspace[1]
+                continue
+                
             distribution, *args = subspace
+
+            if distribution == "categorical":
+                # If args is a list of options, sample from those options
+                if len(args) == 1 and isinstance(args[0], list):
+                    result[label] = trial.suggest_categorical(label, args[0])
+                else:
+                    result[label] = trial.suggest_categorical(label, args)
+                continue
 
             if distribution.startswith('?'):
                 default_value = args[0]
@@ -512,95 +533,147 @@ def show_results(args,info,metric_name,loss_list,results_list,time_list):
         print("CUDA is unavailable.")
     print('-' * 50)
 
-def tune_hyper_parameters(args, opt_space, train_val_data, info):
+def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/work/hdd/bbjr/dbeaglehole/LAMDA-TALENT/'):
     """
-    Tune hyper-parameters with grid search for RFM model and TPE for others.
+    Tune hyper-parameters using TPE.
+    Caches results and saves best hyperparameters after each improvement.
     """
     import optuna
     import optuna.samplers
-    from optuna.samplers import GridSampler
     print("TUNING HYPER-PARAMETERS")
+
+    # Create dataset directory if it doesn't exist
+    dataset_dir = osp.join(cache_path, args.dataset)
+    mkdir(dataset_dir)
+    
+    # Cache file path for storing trial results 
+    cache_path = osp.join(dataset_dir, f'{args.model_type}-{args.dataset}-trial-cache.json')
+    
+    # Path for best hyperparameters
+    best_params_path = osp.join(args.save_path, f'{args.model_type}-tuned.json')
+    
+    # Load existing cache if available
+    if osp.exists(cache_path):
+        with open(cache_path, 'r') as f:
+            trial_cache = json.load(f)
+    else:
+        trial_cache = {}
+
+    # Track best score and config
+    best_score = float('inf') if info['task_type'] == 'regression' else float('-inf')
+    best_config = None
+
+    def get_config_hash(config):
+        """Generate a unique hash for a config dictionary"""
+        # Sort the dictionary to ensure consistent hashing
+        config_str = json.dumps(config, sort_keys=True)
+        return md5(config_str.encode()).hexdigest()
+
+    def save_best_config(config, score):
+        """Save config if it's the best so far and better than previously saved best"""
+        nonlocal best_score, best_config
+        is_regression = info['task_type'] == 'regression'
+        
+        # Try to load existing saved config if it exists
+        saved_score = None
+        if os.path.exists(best_params_path):
+            try:
+                with open(best_params_path, 'r') as fp:
+                    saved_config = json.load(fp)
+                    # Look for saved score in the config
+                    saved_score = saved_config.get('_best_score')
+            except json.JSONDecodeError:
+                print("Warning: Could not read existing best config file")
+        
+        # Compare against current run's best
+        is_better_than_current = score < best_score if is_regression else score > best_score
+        
+        # Compare against saved best if it exists
+        is_better_than_saved = True
+        if saved_score is not None:
+            is_better_than_saved = score < saved_score if is_regression else score > saved_score
+        
+        if is_better_than_current and is_better_than_saved:
+            best_score = score
+            best_config = config
+            # Add score to config before saving
+            config_to_save = config.copy()
+            config_to_save['_best_score'] = score
+            # Save the new best config
+            with open(best_params_path, 'w') as fp:
+                json.dump(config_to_save, fp, sort_keys=True, indent=4)
+            print(f"New best score: {score:.6f} - Saved best config")
+
     def objective(trial):
         config = {}
-        if args.model_type not in ['rfm']:
-            try:
-                opt_space[args.model_type]['training']['n_bins'] = [
-                        "int",
-                        2, 
-                        256
-                ]
-            except:
-                opt_space[args.model_type]['fit']['n_bins'] = [
-                        "int",
-                        2, 
-                        256
-                ]
-            
-        if args.model_type == 'rfm':
-            # Get parameter values from the trial for grid search
-            for category, params in opt_space['rfm'].items():
-                if category not in config:
-                    config[category] = {}
-                for param_name, param_spec in params.items():
-                    param_type, *param_values = param_spec
-                    param_id = f"{category}.{param_name}"
-                    print("param_type", param_type)
-                    print("param_values", param_values)
-                    print("param_id", param_id)
-                    
-                    if param_type == "float":
-                        config[category][param_name] = trial.suggest_float(param_id, param_values[0], param_values[-1])
-                    elif param_type == "int":
-                        config[category][param_name] = trial.suggest_int(param_id, param_values[0], param_values[-1])
-                    elif param_type == "categorical":
-                        config[category][param_name] = trial.suggest_categorical(param_id, param_values)
-                    elif param_type == "str":
-                        config[category][param_name] = trial.suggest_categorical(param_id, param_values)
-
-            # Add n_bins as a fixed value to fit parameters
-            if 'fit' not in config:
-                config['fit'] = {}
-            config['fit']['n_bins'] = 256  # Set to fixed value instead of grid searching
-
-        else:
-            merge_sampled_parameters(
-                config, sample_parameters(trial, opt_space[args.model_type], config)
-            )
+        try:
+            opt_space[args.model_type]['training']['n_bins'] = [
+                    "int",
+                    2, 
+                    256
+            ]
+        except:
+            opt_space[args.model_type]['fit']['n_bins'] = [
+                    "int",
+                    2, 
+                    256
+            ]
+        
+        merge_sampled_parameters(
+            config, sample_parameters(trial, opt_space[args.model_type], config)
+        )
 
         if args.model_type == 'rfm':
-            config['model'].setdefault('iters', 3)
+            config['model'].setdefault('iters', 3)  
 
         trial_configs.append(config)
+        
+        # Generate hash for this config
+        config_hash = get_config_hash(config)
+        
+        # Check if we have cached results
+        if config_hash in trial_cache:
+            print("Found cached result for this configuration")
+            cached_result = trial_cache[config_hash]
+            
+            # Check if cached result is best so far
+            save_best_config(config, cached_result["result"])
+            return cached_result["result"]
+
         try:
+            print("Fitting method. Config:", config)
             method.fit(train_val_data, info, train=True, config=config)    
-            return method.trlog['best_res']
+            result = method.trlog['best_res']
+            
+            # Cache the result
+            trial_cache[config_hash] = {
+                "trial_number": trial.number,
+                "result": result,
+                **{k2: v2 for k2, v2 in config['model'].items()}
+            }
+            
+            # Save cache after each new result
+            with open(cache_path, 'w') as f:
+                json.dump(trial_cache, f, indent=4)
+            
+            # Check if current result is best so far
+            save_best_config(config, result)
+            
+            print("RESULT", result)
+            return result
         except Exception as e:
-            print(e)
+            print("ERROR", e)
             return 1e9 if info['task_type'] == 'regression' else 0.0
 
-    if osp.exists(osp.join(args.save_path, '{}-tuned.json'.format(args.model_type))) and args.retune == False:
-        with open(osp.join(args.save_path, '{}-tuned.json'.format(args.model_type)), 'rb') as fp:
+    if osp.exists(best_params_path) and args.retune == False:
+        with open(best_params_path, 'rb') as fp:
             args.config = json.load(fp)
     else:
         direction = 'minimize' if info['task_type'] == 'regression' else 'maximize'
         print("direction", direction)
-        if args.model_type == 'rfm':
-            # Create grid search space from all values in lists
-            search_space = {}
-            for category, params in opt_space['rfm'].items():
-                for param_name, param_spec in params.items():
-                    param_type, *param_values = param_spec
-                    search_space[f'{category}.{param_name}'] = param_values
-
-            print("Grid Search Space:", search_space)
-            sampler = GridSampler(search_space)
-            n_trials = 1
-            for values in search_space.values():
-                n_trials *= len(values)
-            print(f"Total number of trials to run: {n_trials}")
-        else:
-            sampler = optuna.samplers.TPESampler(seed=0)
-            n_trials = args.n_trials
+        
+        sampler = optuna.samplers.TPESampler(seed=0, n_startup_trials=20)
+        n_trials = args.n_trials
 
         method = get_method(args.model_type)(args, info['task_type'] == 'regression')      
         trial_configs = []
@@ -615,13 +688,15 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info):
             n_trials=n_trials,
             show_progress_bar=True,
         )
+        
+        best_trial_index = study.best_trial.number
+        print("BEST TRIAL INDEX", best_trial_index)
+        best_config = trial_configs[best_trial_index]
 
-        best_trial_id = study.best_trial.number
         print('Best Hyper-Parameters')
-        print(trial_configs[best_trial_id])
-        args.config = trial_configs[best_trial_id]
-        with open(osp.join(args.save_path, '{}-tuned.json'.format(args.model_type)), 'w') as fp:
-            json.dump(args.config, fp, sort_keys=True, indent=4)
+        print(best_config)
+        args.config = best_config
+            
     return args
 
 def get_method(model):

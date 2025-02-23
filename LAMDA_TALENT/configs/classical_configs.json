@@ -1,5 +1,5 @@
 {
-    "dataset": "telco-customer-churn",
+    "dataset": "BLE_RSSI_dataset_for_Indoor_localization",
     "model_type": "rfm",
     "normalization": "standard",
     "num_nan_policy": "mean",
@@ -8,12 +8,14 @@
     "num_policy": "none",
     "n_bins": 2,
     "cat_min_frequency": 0.0,
-    "n_trials": 100,
+    "n_trials": 250,
     "seed_num": 15,
     "gpu": "0",
     "tune": true,
     "retune": true,
     "dataset_path": "datasets",
     "model_path": "results_model",
-    "evaluate_option": "best-val"
+    "evaluate_option": "best-val",
+    "use_ntk": false,
+    "iters": 3
 }

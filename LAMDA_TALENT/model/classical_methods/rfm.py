@@ -6,8 +6,8 @@ import time
 from sklearn.metrics import accuracy_score, mean_squared_error
 
 import sys
-sys.path.append('/u/dbeaglehole/recursive_feature_machines')
-from rfm import LaplaceRFM, GeneralizedLaplaceRFM
+sys.path.insert(0, '/u/dbeaglehole/recursive_feature_machines/')
+from rfm import LaplaceRFM, GeneralizedLaplaceRFM, NTKModel
 import torch
 import numpy as np
 import gc
@@ -22,6 +22,13 @@ from model.lib.data import (
     data_label_process,
     get_categories
 )
+
+def matrix_sqrt(M, device='cuda'):
+    eigvals, eigvecs = torch.linalg.eigh(M.to(device))
+    eigvals = torch.clamp(eigvals, min=0)
+    sqrt_eigvals = torch.sqrt(eigvals)
+    sqrtM = eigvecs @ torch.diag(sqrt_eigvals) @ eigvecs.T
+    return sqrtM.to(M.device)
 
 def one_hot_encode(labels, num_classes):
     """Convert class labels to one-hot encoded format.
@@ -41,9 +48,10 @@ class RFMMethod(classical_methods):
         assert(args.cat_policy not in ['indices'])
 
     def construct_model(self, model_config = None):
+        print("self.args", self.args)
         if model_config is None:
             model_config = self.args.config['model']
-
+        print("MODEL CONFIG", model_config)
         self.args.cat_policy = model_config['cat_policy']
         self.args.normalization = model_config['normalization']
         iters = model_config['iters']
@@ -52,6 +60,7 @@ class RFMMethod(classical_methods):
         kernel_type = model_config['kernel_type']
         exponent = model_config['exponent']
 
+        self.use_ntk = model_config['use_ntk']
         self.kernel_type = kernel_type
         self.exponent = exponent
 
@@ -97,15 +106,21 @@ class RFMMethod(classical_methods):
         y_train = torch.from_numpy(self.y['train']).to(dtype=torch.float32, device='cuda')
         y_val = torch.from_numpy(self.y['val']).to(dtype=torch.float32, device='cuda') 
 
-        is_classification = not self.is_regression
-
-        num_classes = len(torch.unique(y_train))
-        
+        is_classification = self.is_binclass or self.is_multiclass
+        if is_classification:
+            print("Getting num classes")
+            if 'n_classes' in info:
+                num_classes = info['n_classes']
+            elif 'num_classes' in info:
+                num_classes = info['num_classes']
+            else:
+                num_classes = len(torch.unique(y_train))
+                
         if len(y_train.shape)==1:
-            if self.is_regression or num_classes == 2:
+            if self.is_regression or self.is_binclass:
                 y_train = y_train.unsqueeze(-1)
                 y_val = y_val.unsqueeze(-1)
-            elif is_classification and num_classes > 2:
+            elif self.is_multiclass:
                 y_train = one_hot_encode(y_train, num_classes)
                 y_val = one_hot_encode(y_val, num_classes)
 
@@ -113,20 +128,35 @@ class RFMMethod(classical_methods):
         self.model.fit((X_train, y_train), 
                        (X_val, y_val), 
                        loader=False, 
-                       classif=is_classification, 
+                       classification=is_classification, 
                        method='lstsq', 
-                       M_batch_size=2048)
+                       M_batch_size=2048,
+                       return_best_params=True)
         
-        y_val_pred = self.model.predict(X_val).cpu()
-
-        if is_classification:
-            if len(y_val.shape)<= 2 and len(torch.unique(y_val)) == 2:
-                y_val_pred = torch.where(y_val_pred > 0.5, 1, 0).reshape(y_val.shape)
+        self.trlog['best_iter'] = self.model.best_iter
+        
+        if self.use_ntk:
+            if self.model.sqrtM is None:
+                sqrtM = matrix_sqrt(self.model.M)
             else:
-                y_val = y_val.argmax(dim=1)
-                y_val_pred = torch.argmax(y_val_pred, dim=1).reshape(y_val.shape)
+                sqrtM = self.model.sqrtM
+            ntk_model = NTKModel(sqrtM=sqrtM, reg=self.model.reg, device='cuda')
+            ntk_model.fit(X_train, y_train)
+            y_val_pred = ntk_model.predict(X_val).cpu()
+        else:
+            y_val_pred = self.model.predict(X_val).cpu()
+
+        if self.is_binclass:
+            print("Binary classification")
+            y_val_pred = torch.where(y_val_pred > 0.5, 1, 0).reshape(y_val.shape)
+            self.trlog['best_res'] = accuracy_score(y_val.cpu(), y_val_pred)
+        elif self.is_multiclass:
+            print("Multi-class classification")
+            y_val = torch.argmax(y_val, dim=1)
+            y_val_pred = torch.argmax(y_val_pred, dim=1).reshape(y_val.shape)
             self.trlog['best_res'] = accuracy_score(y_val.cpu(), y_val_pred)
         else:
+            print("Regression")
             # Calculate RMSE manually without the squared parameter
             mse = mean_squared_error(y_val.cpu(), y_val_pred.reshape(y_val.shape))
             self.trlog['best_res'] = (mse ** 0.5) * self.y_info['std']  # Convert MSE to RMSE and scale
@@ -145,7 +175,8 @@ class RFMMethod(classical_methods):
             'kernel_type': self.kernel_type,
             'exponent': self.exponent,
             'cat_policy': self.args.cat_policy,
-            'normalization': self.args.normalization
+            'normalization': self.args.normalization,
+            'use_ntk': self.use_ntk
         }, ops.join(self.args.save_path, f'best-val-{self.args.seed}.pt'))
 
         torch.cuda.empty_cache()
@@ -158,7 +189,9 @@ class RFMMethod(classical_methods):
 
         # Load saved attributes
         checkpoint = torch.load(ops.join(self.args.save_path, f'best-val-{self.args.seed}.pt'))
-        if checkpoint['kernel_type'] == 'laplace':
+        if checkpoint['use_ntk']:
+            self.model = NTKModel()
+        elif checkpoint['kernel_type'] == 'laplace':
             self.model = LaplaceRFM(device='cuda')
         elif checkpoint['kernel_type'] == 'gen_laplace':
             self.model = GeneralizedLaplaceRFM(device='cuda', exponent=checkpoint['exponent'])
@@ -166,11 +199,25 @@ class RFMMethod(classical_methods):
         self.model.M = checkpoint['M']
         if checkpoint['sqrtM'] is not None:
             self.model.sqrtM = checkpoint['sqrtM']
+        else:
+            self.model.sqrtM = matrix_sqrt(self.model.M)
+
         self.model.bandwidth = checkpoint['bandwidth']
         self.args.cat_policy = checkpoint['cat_policy']
         self.args.normalization = checkpoint['normalization']
         print("Predicting with cat_policy:", self.args.cat_policy)
         print("Predicting with normalization:", self.args.normalization)
+        print("Model bandwidth:", checkpoint['bandwidth'])
+        print("Model exponent:", checkpoint['exponent'])
+        print("Model use_ntk:", checkpoint['use_ntk'])
+        try:
+            print("Model M:", checkpoint['M'][:5,:5])
+        except:
+            print("Model M:", checkpoint['M'])
+        try:
+            print("Model sqrtM:", checkpoint['sqrtM'][:5,:5])
+        except:
+            print("Model sqrtM:", checkpoint['sqrtM'])
 
         if self.C is None:
             assert self.N is not None
