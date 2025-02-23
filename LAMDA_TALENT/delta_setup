@@ -1,0 +1,24 @@
+#!/bin/bash
+#SBATCH -o logs/%x.%j.log
+#SBATCH --error=logs/%x.%j.err
+#SBATCH -p gpuA40x4
+#SBATCH --gpus 1
+#SBATCH --mem 70G
+#SBATCH --ntasks-per-node=1
+#SBATCH --account bbjr-delta-gpu
+#SBATCH -N 1              # Number of nodes, not cores (16 cores/node)
+#SBATCH -n 1             # Total number of MPI tasks 
+#SBATCH --time=4:00:00
+
+eval "$(conda shell.bash hook)"
+conda activate daniel_jax
+echo "daniel_jax activated"
+
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/u/dbeaglehole/.conda/envs/daniel_jax/lib
+export PATH=/u/dbeaglehole/.conda/envs/daniel_jax/bin:$PATH
+
+echo "Delta setup"
+
+cd /u/dbeaglehole/LAMDA-TALENT-rfm/LAMDA_TALENT
+
+$@
