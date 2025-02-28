@@ -1,0 +1,28 @@
+{
+    "kernel": {
+        "model": {
+            "bandwidth": [
+                "float", 10, 1000
+            ],
+            "reg": [
+                "float", 1e-5, 1e-1
+            ],
+            "exponent": [
+                "float", 1.0, 1.4
+            ],
+            "kernel_type": [
+                "categorical", "laplace"
+            ],
+            "cat_policy": [
+                "categorical", "ordinal", "ohe"
+            ],
+            "normalization": [
+                "categorical", "minmax", "standard", "quantile"
+            ],
+            "use_ntk": [
+                "categorical", false
+            ]
+        },
+        "fit": {}
+    }
+}

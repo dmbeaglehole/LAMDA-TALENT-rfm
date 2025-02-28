@@ -1,0 +1,16 @@
+{
+    "kernel": {
+        "model": {
+                "bandwidth": 100.0, 
+                "reg": 0.01, 
+                "kernel_type": "laplace", 
+                "exponent": 1.0, 
+                "use_ntk": false, 
+                "use_feature_learning": false, 
+                "cat_policy": "ordinal", 
+                "normalization": "standard",
+                "iters": 0
+            },
+        "fit": {}
+    }
+}

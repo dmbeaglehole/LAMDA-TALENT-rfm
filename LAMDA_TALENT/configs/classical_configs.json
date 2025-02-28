@@ -1,21 +1,20 @@
 {
-    "dataset": "BLE_RSSI_dataset_for_Indoor_localization",
-    "model_type": "rfm",
+    "dataset": "customer_satisfaction_in_airline",
+    "model_type": "kernel",
     "normalization": "standard",
     "num_nan_policy": "mean",
     "cat_nan_policy": "new",
-    "cat_policy": "ordinal",
+    "cat_policy": "ohe",
     "num_policy": "none",
     "n_bins": 2,
     "cat_min_frequency": 0.0,
     "n_trials": 250,
     "seed_num": 15,
     "gpu": "0",
-    "tune": true,
-    "retune": true,
+    "tune": false,
+    "retune": false,
     "dataset_path": "datasets",
-    "model_path": "results_model",
+    "model_path": "kernel_results_model",
     "evaluate_option": "best-val",
-    "use_ntk": false,
-    "iters": 3
+    "use_ntk": false
 }
