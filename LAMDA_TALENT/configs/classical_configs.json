@@ -1,6 +1,6 @@
 {
-    "dataset": "customer_satisfaction_in_airline",
-    "model_type": "kernel",
+    "dataset": "BNG(mv)",
+    "model_type": "rfm",
     "normalization": "standard",
     "num_nan_policy": "mean",
     "cat_nan_policy": "new",
@@ -8,13 +8,13 @@
     "num_policy": "none",
     "n_bins": 2,
     "cat_min_frequency": 0.0,
-    "n_trials": 250,
+    "n_trials": 100,
     "seed_num": 15,
     "gpu": "0",
-    "tune": false,
+    "tune": true,
     "retune": false,
     "dataset_path": "datasets",
-    "model_path": "kernel_results_model",
+    "model_path": "results_model",
     "evaluate_option": "best-val",
     "use_ntk": false
 }

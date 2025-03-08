@@ -2,7 +2,7 @@
     "rfm": {
         "model": {
             "bandwidth": [
-                "float", 10, 1000
+                "float", 5, 500
             ],
             "reg": [
                 "float", 1e-5, 1e-1
@@ -10,14 +10,20 @@
             "exponent": [
                 "float", 1.0, 1.4
             ],
-            "kernel_type": [
-                "categorical", "gen_laplace", "laplace"
-            ],
             "cat_policy": [
                 "categorical", "ordinal", "ohe"
             ],
             "normalization": [
-                "categorical", "minmax", "standard", "quantile"
+                "categorical", "standard", "quantile", "minmax"
+            ],
+            "kernel_type": [
+                "categorical", "laplace"
+            ],
+            "agop_power": [
+                "float", 0.5, 0.5
+            ],
+            "diag": [
+                "categorical", false, true
             ],
             "use_ntk": [
                 "categorical", false
