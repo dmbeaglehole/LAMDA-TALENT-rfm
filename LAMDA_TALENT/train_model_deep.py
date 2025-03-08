@@ -7,7 +7,7 @@ from model.utils import (
 from model.lib.data import (
     get_dataset
 )
-
+import pickle
 
 if __name__ == '__main__':
     loss_list, results_list, time_list = [], [], []
@@ -28,5 +28,15 @@ if __name__ == '__main__':
         results_list.append(vres)
         time_list.append(time_cost)
 
-    show_results(args,info, metric_name,loss_list,results_list,time_list)
+    show_results(args,info, metric_name, loss_list, results_list, time_list)
+    with open(f"/u/dbeaglehole/LAMDA-TALENT-rfm/pfn-v2-results/{args.dataset}-{args.model_type}.pkl", "wb") as f:
+        d = {
+            "info": info,
+            "args": args,
+            "losses": loss_list,
+            "results": results_list,
+            "time": time_list,
+            "metric_name": metric_name,
+        }
+        pickle.dump(d, f)
 

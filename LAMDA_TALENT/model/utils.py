@@ -681,7 +681,7 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
         direction = 'minimize' if info['task_type'] == 'regression' else 'maximize'
         print("direction", direction)
         
-        sampler = optuna.samplers.TPESampler(seed=0, n_startup_trials=20)
+        sampler = optuna.samplers.TPESampler(seed=0)#, n_startup_trials=20)
         n_trials = args.n_trials
 
         method = get_method(args.model_type)(args, info['task_type'] == 'regression')      
