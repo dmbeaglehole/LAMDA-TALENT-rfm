@@ -7,7 +7,8 @@ from sklearn.metrics import accuracy_score, mean_squared_error
 
 import sys
 sys.path.insert(0, '/u/dbeaglehole/recursive_feature_machines/')
-from rfm import LaplaceRFM, GeneralizedLaplaceRFM, NTKModel
+from rfm import LaplaceRFM, GeneralizedLaplaceRFM, NTKModel, matrix_sqrt
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,13 +26,6 @@ from model.lib.data import (
     data_label_process,
     get_categories
 )
-
-def matrix_sqrt(M, device='cuda'):
-    eigvals, eigvecs = torch.linalg.eigh(M.to(device))
-    eigvals = torch.clamp(eigvals, min=0)
-    sqrt_eigvals = torch.sqrt(eigvals)
-    sqrtM = eigvecs @ torch.diag(sqrt_eigvals) @ eigvecs.T
-    return sqrtM.to(M.device)
 
 def one_hot_encode(labels, num_classes):
     """Convert class labels to one-hot encoded format.
@@ -86,11 +80,11 @@ class RFMMethod(classical_methods):
         self.agop_power = model_config['agop_power']
 
         if kernel_type == 'laplace':
-            self.model = LaplaceRFM(device='cuda', reg=reg, bandwidth=bandwidth, iters=iters)   
+            self.model = LaplaceRFM(device='cuda', reg=reg, bandwidth=bandwidth, iters=iters, diag=self.diag)   
         elif kernel_type == 'gen_laplace':
             exponent = model_config['exponent']
-            p_batch_size = 512
-            self.model = GeneralizedLaplaceRFM(device='cuda', reg=reg, bandwidth=bandwidth, iters=iters, exponent=exponent, p_batch_size=p_batch_size)
+            p_batch_size = 256
+            self.model = GeneralizedLaplaceRFM(device='cuda', reg=reg, bandwidth=bandwidth, iters=iters, exponent=exponent, p_batch_size=p_batch_size, diag=self.diag)
 
 
     def fit(self, data, info, train=True, config=None, train_on_subset=False, agop_path='./agops/'):
@@ -240,7 +234,8 @@ class RFMMethod(classical_methods):
             'exponent': self.exponent,
             'cat_policy': self.args.cat_policy,
             'normalization': self.args.normalization,
-            'use_ntk': self.use_ntk
+            'use_ntk': self.use_ntk,
+            'diag': self.diag
         }, ops.join(self.args.save_path, f'best-val-{self.args.seed}.pt'))
 
         torch.cuda.empty_cache()
@@ -269,6 +264,7 @@ class RFMMethod(classical_methods):
         self.model.bandwidth = checkpoint['bandwidth']
         self.args.cat_policy = checkpoint['cat_policy']
         self.args.normalization = checkpoint['normalization']
+        self.model.diag = checkpoint['diag']
 
         if self.C is None:
             assert self.N is not None
