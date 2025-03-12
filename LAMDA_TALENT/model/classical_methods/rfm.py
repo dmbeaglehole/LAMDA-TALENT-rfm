@@ -83,8 +83,7 @@ class RFMMethod(classical_methods):
             self.model = LaplaceRFM(device='cuda', reg=reg, bandwidth=bandwidth, iters=iters, diag=self.diag)   
         elif kernel_type == 'gen_laplace':
             exponent = model_config['exponent']
-            p_batch_size = 256
-            self.model = GeneralizedLaplaceRFM(device='cuda', reg=reg, bandwidth=bandwidth, iters=iters, exponent=exponent, p_batch_size=p_batch_size, diag=self.diag)
+            self.model = GeneralizedLaplaceRFM(device='cuda', reg=reg, bandwidth=bandwidth, iters=iters, exponent=exponent, diag=self.diag)
 
 
     def fit(self, data, info, train=True, config=None, train_on_subset=False, agop_path='./agops/'):
@@ -175,7 +174,7 @@ class RFMMethod(classical_methods):
                        (X_val, y_val), 
                        classification=is_classification, 
                        method=fit_method, 
-                       M_batch_size=8192,
+                       M_batch_size=8192 if self.kernel_type=='laplace' else 256,
                        return_best_params=True,
                        bs=4096,
                        top_q=196,
