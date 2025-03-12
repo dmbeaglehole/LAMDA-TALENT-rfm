@@ -18,13 +18,7 @@ import os
 
 
 from model.lib.data import (
-    Dataset,
-    data_nan_process,
-    data_enc_process,
-    data_norm_process,
-    num_enc_process,
-    data_label_process,
-    get_categories
+    Dataset
 )
 
 def one_hot_encode(labels, num_classes):
@@ -145,13 +139,13 @@ class RFMMethod(classical_methods):
         if not self.use_feature_learning:
             self.model.iters = 0
 
-        if len(X_train) <= 50000:
+        if len(X_train) <= 75000:
             # use lstsq for small datasets
             fit_method = 'lstsq'
             iters_to_use = self.model.iters
-        elif len(X_train) <= 75000:
-            fit_method = 'eigenpro'
-            iters_to_use = self.model.iters
+        # elif len(X_train) <= 75000:
+        #     fit_method = 'eigenpro'
+        #     iters_to_use = self.model.iters
         elif train_on_subset:
             # large dataset, but tune on subset of the training data, using lstsq
             fit_method = 'lstsq'
@@ -236,9 +230,11 @@ class RFMMethod(classical_methods):
             'use_ntk': self.use_ntk,
             'diag': self.diag
         }, ops.join(self.args.save_path, f'best-val-{self.args.seed}.pt'))
-
+        
+        del self.model
         torch.cuda.empty_cache()
         gc.collect()
+        
         return time_cost
 
     def predict(self, data, info, model_name):
