@@ -59,7 +59,9 @@ class SmoothClampedReLU(nn.Module):
 class RFMMethod(classical_methods):
     def __init__(self, args, is_regression):
         super().__init__(args, is_regression)
-        assert(args.cat_policy not in ['indices'])
+        # assert(args.cat_policy not in ['indices'])
+        assert(args.cat_policy == 'ohe')
+        assert(args.normalization == 'standard')
 
     def construct_model(self, model_config = None):
         if model_config is None:
@@ -72,7 +74,6 @@ class RFMMethod(classical_methods):
         kernel_type = model_config['kernel_type']
         exponent = model_config['exponent']
 
-        self.use_feature_learning = model_config['use_feature_learning']
         self.kernel_type = kernel_type
         self.exponent = exponent
         self.diag = model_config['diag']
@@ -80,10 +81,10 @@ class RFMMethod(classical_methods):
         self.agop_power = model_config['agop_power']
 
         if kernel_type == 'laplace':
-            self.model = GenericRFM(kernel_obj=LaplaceKernel(bandwidth=bandwidth, exponent=exponent), device='cuda', reg=reg, 
+            self.model = GenericRFM(kernel=LaplaceKernel(bandwidth=bandwidth, exponent=exponent), device='cuda', reg=reg, 
                                                     iters=iters, diag=self.diag, centering=self.center_grads, agop_power=self.agop_power)   
         elif kernel_type == 'gen_laplace':
-            self.model = GenericRFM(kernel_obj=ProductLaplaceKernel(bandwidth=bandwidth, exponent=exponent), device='cuda', reg=reg, 
+            self.model = GenericRFM(kernel=ProductLaplaceKernel(bandwidth=bandwidth, exponent=exponent), device='cuda', reg=reg, 
                                                     iters=iters, diag=self.diag, centering=self.center_grads, agop_power=self.agop_power)
 
     def data_format(self, is_train = True, N = None, C = None, y = None):
@@ -91,6 +92,8 @@ class RFMMethod(classical_methods):
         print("normalization:", self.args.normalization)
         num_numerical_features = self.N['train'].shape[1] if self.N is not None else 0
         num_categorical_features = self.C['train'].shape[1] if self.C is not None else 0
+        print("num_numerical_features:", num_numerical_features)
+        print("num_categorical_features:", num_categorical_features)
         if is_train:
             self.N, self.C, self.num_new_value, self.imputer, self.cat_new_value = data_nan_process(self.N, self.C, self.args.num_nan_policy, self.args.cat_nan_policy)
             self.y, self.y_info, self.label_encoder = data_label_process(self.y, self.is_regression)
@@ -133,13 +136,20 @@ class RFMMethod(classical_methods):
         num_total_features = num_features_so_far
         categorical_vectors = []
         for cat_idx in categorical_indices:
+            num_current_cat_features = len(cat_idx)
             sample_points = np.zeros((num_current_cat_features, num_total_features))
             sample_points[:, cat_idx] = np.eye(num_current_cat_features)
             sample_points = self.normalizer.transform(sample_points)
             sample_points = torch.from_numpy(sample_points).to(dtype=torch.float32, device='cuda')
 
             sample_points = sample_points[:, cat_idx]
+            if len(sample_points.shape) == 1:
+                sample_points = sample_points.unsqueeze(1)
+
+            assert sample_points.shape[0] == sample_points.shape[1] == num_current_cat_features
             categorical_vectors.append(sample_points.clone())
+
+        assert len(categorical_vectors) == len(categorical_indices)
 
         return numerical_indices, categorical_indices, categorical_vectors
 
@@ -182,6 +192,10 @@ class RFMMethod(classical_methods):
         y_train = torch.from_numpy(self.y['train']).to(dtype=torch.float32, device='cuda')
         y_val = torch.from_numpy(self.y['val']).to(dtype=torch.float32, device='cuda') 
 
+        print("X_train.shape:", X_train.shape)
+        print("X_val.shape:", X_val.shape)
+        print("y_train.shape:", y_train.shape)
+        print("y_val.shape:", y_val.shape)
 
         is_classification = self.is_binclass or self.is_multiclass
         if is_classification:
@@ -213,9 +227,12 @@ class RFMMethod(classical_methods):
         iters_to_use = self.model.iters
         if self.model.kernel_type == 'generic' and isinstance(self.model.kernel_obj, ProductLaplaceKernel):
             if len(X_train) <= 10_000:
+                pass
+            elif len(X_train) <= 20_000 and X_train.shape[1] <= 1000:
                 total_points_to_sample = 10_000
-            elif len(X_train) <= 20_000:
-                total_points_to_sample = 2000
+                iters_to_use = 4
+            elif len(X_train) <= 50_000 and X_train.shape[1] <= 2000:
+                total_points_to_sample = 5000
                 iters_to_use = 2
             else:
                 total_points_to_sample = 1000
@@ -269,7 +286,7 @@ class RFMMethod(classical_methods):
             'weights': self.model.weights,
             'M': self.model.M,
             'sqrtM': sqrtM,
-            'bandwidth': self.model.bandwidth,
+            'bandwidth': self.model.kernel_obj.bandwidth if self.model.kernel_type == 'generic' else self.model.bandwidth,
             'is_classification': is_classification,
             'kernel_type': self.kernel_type,
             'exponent': self.exponent,
@@ -293,11 +310,11 @@ class RFMMethod(classical_methods):
         # Load saved attributes
         checkpoint = torch.load(ops.join(self.args.save_path, f'best-val-{self.args.seed}.pt'))
         if checkpoint['kernel_type'] == 'laplace':
-            self.model = GenericRFM(kernel_obj=LaplaceKernel(bandwidth=checkpoint['bandwidth'], exponent=checkpoint['exponent']), 
+            self.model = GenericRFM(kernel=LaplaceKernel(bandwidth=checkpoint['bandwidth'], exponent=checkpoint['exponent']), 
                                     device='cuda', reg=checkpoint['reg'], iters=checkpoint['iters'], 
                                     diag=checkpoint['diag'])
         elif checkpoint['kernel_type'] == 'gen_laplace':
-            self.model = GenericRFM(kernel_obj=ProductLaplaceKernel(bandwidth=checkpoint['bandwidth'], exponent=checkpoint['exponent']), 
+            self.model = GenericRFM(kernel=ProductLaplaceKernel(bandwidth=checkpoint['bandwidth'], exponent=checkpoint['exponent']), 
                                     device='cuda', reg=checkpoint['reg'], iters=checkpoint['iters'], 
                                     diag=checkpoint['diag'])
         self.model.weights = checkpoint['weights']

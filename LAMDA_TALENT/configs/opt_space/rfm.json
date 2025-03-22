@@ -17,13 +17,13 @@
                 "categorical", "standard"
             ],
             "kernel_type": [
-                "categorical", "laplace", "gen_laplace"
+                "categorical", "gen_laplace"
             ],
             "agop_power": [
                 "float", 0.3, 0.8
             ],
             "center_grads": [
-                "categorical", false, true
+                "categorical", false
             ],
             "diag": [
                 "categorical", false, true

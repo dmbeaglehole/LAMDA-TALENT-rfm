@@ -1,5 +1,5 @@
 {
-    "dataset": "BNG(mv)",
+    "dataset": "Credit_c",
     "model_type": "rfm",
     "normalization": "standard",
     "num_nan_policy": "mean",
@@ -12,7 +12,7 @@
     "seed_num": 15,
     "gpu": "0",
     "tune": true,
-    "retune": false,
+    "retune": true,
     "dataset_path": "datasets",
     "model_path": "results_model",
     "evaluate_option": "best-val",

@@ -627,10 +627,8 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
         )
 
         if args.model_type == 'rfm':
-            config['model'].setdefault('use_feature_learning', True)
             config['model'].setdefault('iters', 4)  
         elif args.model_type == 'kernel':
-            config['model'].setdefault('use_feature_learning', False)
             config['model'].setdefault('iters', 0)
 
         trial_configs.append(config)
@@ -650,7 +648,7 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
         try:
             print("Fitting method. Config:", config)
             info['trial'] = trial.number
-            method.fit(train_val_data, info, train=True, config=config, train_on_subset=True)    
+            method.fit(train_val_data, info, train=True, config=config)    
             result = method.trlog['best_res']
             
             # Cache the result
@@ -672,6 +670,7 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
         except Exception as e:
             print("ERROR", e)
             print(f"Full error traceback:\n{traceback.format_exc()}")
+            exit()
             return 1e9 if info['task_type'] == 'regression' else 0.0
 
     if osp.exists(best_params_path) and args.retune == False:
