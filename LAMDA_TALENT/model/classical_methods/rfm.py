@@ -7,7 +7,8 @@ from sklearn.metrics import accuracy_score, mean_squared_error
 
 import sys
 sys.path.insert(0, '/u/dbeaglehole/recursive_feature_machines/')
-from rfm import LaplaceRFM, GeneralizedLaplaceRFM, NTKModel, matrix_sqrt
+from rfm import GenericRFM, matrix_power
+from rfm.generic_kernels import LaplaceKernel, ProductLaplaceKernel
 
 import torch
 import torch.nn as nn
@@ -18,7 +19,12 @@ import os
 
 
 from model.lib.data import (
-    Dataset
+    Dataset,
+    data_nan_process,
+    data_label_process,
+    num_enc_process,
+    data_enc_process,
+    data_norm_process
 )
 
 def one_hot_encode(labels, num_classes):
@@ -67,20 +73,79 @@ class RFMMethod(classical_methods):
         exponent = model_config['exponent']
 
         self.use_feature_learning = model_config['use_feature_learning']
-        self.use_ntk = model_config['use_ntk']
         self.kernel_type = kernel_type
         self.exponent = exponent
         self.diag = model_config['diag']
+        self.center_grads = model_config['center_grads']
         self.agop_power = model_config['agop_power']
 
         if kernel_type == 'laplace':
-            self.model = LaplaceRFM(device='cuda', reg=reg, bandwidth=bandwidth, iters=iters, diag=self.diag)   
+            self.model = GenericRFM(kernel_obj=LaplaceKernel(bandwidth=bandwidth, exponent=exponent), device='cuda', reg=reg, 
+                                                    iters=iters, diag=self.diag, centering=self.center_grads, agop_power=self.agop_power)   
         elif kernel_type == 'gen_laplace':
-            exponent = model_config['exponent']
-            self.model = GeneralizedLaplaceRFM(device='cuda', reg=reg, bandwidth=bandwidth, iters=iters, exponent=exponent, diag=self.diag)
+            self.model = GenericRFM(kernel_obj=ProductLaplaceKernel(bandwidth=bandwidth, exponent=exponent), device='cuda', reg=reg, 
+                                                    iters=iters, diag=self.diag, centering=self.center_grads, agop_power=self.agop_power)
 
+    def data_format(self, is_train = True, N = None, C = None, y = None):
+        print("formmating with cat_policy:", self.args.cat_policy)
+        print("normalization:", self.args.normalization)
+        num_numerical_features = self.N['train'].shape[1] if self.N is not None else 0
+        num_categorical_features = self.C['train'].shape[1] if self.C is not None else 0
+        if is_train:
+            self.N, self.C, self.num_new_value, self.imputer, self.cat_new_value = data_nan_process(self.N, self.C, self.args.num_nan_policy, self.args.cat_nan_policy)
+            self.y, self.y_info, self.label_encoder = data_label_process(self.y, self.is_regression)
+            self.n_bins = self.args.config['fit']['n_bins']
+            self.N,self.num_encoder = num_enc_process(self.N,num_policy = self.args.num_policy, n_bins = self.n_bins,y_train=self.y['train'],is_regression=self.is_regression)
+            self.N, self.C, self.ord_encoder, self.mode_values, self.cat_encoder = data_enc_process(self.N, self.C, self.args.cat_policy, self.y['train'])
+            self.N, self.normalizer = data_norm_process(self.N, self.args.normalization, self.args.seed)
+            
+            if self.is_regression:
+                self.d_out = 1
+            else:
+                self.d_out = len(np.unique(self.y['train']))
+            self.n_num_features = self.N['train'].shape[1] if self.N is not None else 0
+            self.n_cat_features = self.C['train'].shape[1] if self.C is not None else 0
+            self.d_in = 0 if self.N is None else self.N['train'].shape[1]
+        else:
+            N_test, C_test, _, _, _ = data_nan_process(N, C, self.args.num_nan_policy, self.args.cat_nan_policy, self.num_new_value, self.imputer, self.cat_new_value)
+            y_test, _, _ = data_label_process(y, self.is_regression, self.y_info, self.label_encoder)
+            N_test,_ = num_enc_process(N_test,num_policy=self.args.num_policy,n_bins = self.n_bins,y_train=None,encoder = self.num_encoder)
+            N_test, C_test, _, _, _ = data_enc_process(N_test, C_test, self.args.cat_policy, None, self.ord_encoder, self.mode_values, self.cat_encoder)
+            N_test, _ = data_norm_process(N_test, self.args.normalization, self.args.seed, self.normalizer)
+            if N_test is not None and C_test is not None:
+                self.N_test,self.C_test = N_test['test'],C_test['test']
+            elif N_test is None and C_test is not None:
+                self.N_test,self.C_test = None,C_test['test']
+            else:
+                self.N_test,self.C_test = N_test['test'],None
+            self.y_test = y_test['test']
+            return
+        
+        numerical_indices = torch.arange(num_numerical_features)
+        categorical_indices = []
+        
+        num_features_so_far = num_numerical_features+0
+        for cats in self.cat_encoder.categories_:
+            num_current_cat_features = len(cats)
+            categorical_indices.append(torch.arange(num_features_so_far, num_features_so_far+num_current_cat_features))
+            num_features_so_far += num_current_cat_features
 
-    def fit(self, data, info, train=True, config=None, train_on_subset=False, agop_path='./agops/'):
+        num_total_features = num_features_so_far
+        categorical_vectors = []
+        for cat_idx in categorical_indices:
+            sample_points = np.zeros((num_current_cat_features, num_total_features))
+            sample_points[:, cat_idx] = np.eye(num_current_cat_features)
+            sample_points = self.normalizer.transform(sample_points)
+            sample_points = torch.from_numpy(sample_points).to(dtype=torch.float32, device='cuda')
+
+            sample_points = sample_points[:, cat_idx]
+            categorical_vectors.append(sample_points.clone())
+
+        return numerical_indices, categorical_indices, categorical_vectors
+
+        
+
+    def fit(self, data, info, train=True, config=None):
         N, C, y = data
         # if the method already fit the dataset, skip these steps (such as the hyper-tune process)
         self.D = Dataset(N, C, y, info)
@@ -96,7 +161,7 @@ class RFMMethod(classical_methods):
             if 'normalization' in self.args.config['model']:
                 self.args.normalization = self.args.config['model']['normalization']
 
-        self.data_format(is_train = True)
+        numerical_indices, categorical_indices, categorical_vectors = self.data_format(is_train = True)
         self.construct_model()
         
         if self.C is None:
@@ -136,65 +201,48 @@ class RFMMethod(classical_methods):
                 y_train = one_hot_encode(y_train, num_classes)
                 y_val = one_hot_encode(y_val, num_classes)
 
-        if not self.use_feature_learning:
-            self.model.iters = 0
+        M_batch_size = 8192 if self.kernel_type=='laplace' else None
 
-        if len(X_train) <= 75000:
+        if len(X_train) <= 75_000:
             # use lstsq for small datasets
             fit_method = 'lstsq'
-            iters_to_use = self.model.iters
-        # elif len(X_train) <= 75000:
-        #     fit_method = 'eigenpro'
-        #     iters_to_use = self.model.iters
-        elif train_on_subset:
-            # large dataset, but tune on subset of the training data, using lstsq
-            fit_method = 'lstsq'
-            train_subset_ids = np.random.choice(range(X_train.shape[0]), size=50000, replace=False)
-            X_train = X_train[train_subset_ids]
-            y_train = y_train[train_subset_ids]
-            iters_to_use = self.model.iters
-        else:
-            # large dataset, train on the entire training data, using eigenpro and zero iterations of RFM
-            # pre-trained M matrix is used
+        elif len(X_train) <= 100_000:
             fit_method = 'eigenpro'
-            iters_to_use = 0
-            if self.use_feature_learning:
-                M_path = os.path.join(agop_path, f'agop_{self.args.dataset}_trial_{self.args.best_trial}.pt')
-                self.model.M = torch.load(M_path).cuda()
-                print("Loaded M matrix from", M_path)
+
+        total_points_to_sample = 20_000
+        iters_to_use = self.model.iters
+        if self.model.kernel_type == 'generic' and isinstance(self.model.kernel_obj, ProductLaplaceKernel):
+            if len(X_train) <= 10_000:
+                total_points_to_sample = 10_000
+            elif len(X_train) <= 20_000:
+                total_points_to_sample = 2000
+                iters_to_use = 2
+            else:
+                total_points_to_sample = 1000
+                iters_to_use = 1
+            self.model.set_categorical_indices(numerical_indices, categorical_indices, categorical_vectors)
+            
 
         tic = time.time()
         self.model.fit((X_train, y_train), 
-                       (X_val, y_val), 
-                       classification=is_classification, 
-                       method=fit_method, 
-                       M_batch_size=8192 if self.kernel_type=='laplace' else 256,
-                       return_best_params=True,
-                       bs=4096,
-                       top_q=196,
-                       epochs=60,
-                       lr_scale=1.0,
-                       n_subsamples=16384,
-                       verbose=True,
-                       iters=iters_to_use)
+                        (X_val, y_val), 
+                        classification=is_classification, 
+                        method=fit_method, 
+                        M_batch_size=M_batch_size,
+                        return_best_params=True,
+                        bs=4096,
+                        top_q=196,
+                        epochs=20,
+                        lr_scale=1.0,
+                        n_subsamples=16384,
+                        verbose=True,
+                        total_points_to_sample=total_points_to_sample,
+                        iters=iters_to_use)
         
         self.trlog['best_iter'] = self.model.best_iter
 
-        if self.use_feature_learning and train_on_subset:
-            print("Saving M matrix")
-            M_path = os.path.join(agop_path, f'agop_{self.args.dataset}_trial_{info["trial"]}.pt')
-            torch.save(self.model.M.cpu(), M_path)
-        
-        if self.use_ntk:
-            if self.model.sqrtM is None:
-                sqrtM = matrix_sqrt(self.model.M)
-            else:
-                sqrtM = self.model.sqrtM
-            ntk_model = NTKModel(sqrtM=sqrtM, reg=self.model.reg, device='cuda')
-            ntk_model.fit(X_train, y_train)
-            y_val_pred = ntk_model.predict(X_val).cpu()
-        else:
-            y_val_pred = self.model.predict(X_val).cpu()
+
+        y_val_pred = self.model.predict(X_val).cpu()
 
         if self.is_binclass:
             print("Binary classification")
@@ -227,8 +275,9 @@ class RFMMethod(classical_methods):
             'exponent': self.exponent,
             'cat_policy': self.args.cat_policy,
             'normalization': self.args.normalization,
-            'use_ntk': self.use_ntk,
-            'diag': self.diag
+            'diag': self.diag,
+            'center_grads': self.center_grads,
+            'agop_power': self.agop_power
         }, ops.join(self.args.save_path, f'best-val-{self.args.seed}.pt'))
         
         del self.model
@@ -243,18 +292,20 @@ class RFMMethod(classical_methods):
 
         # Load saved attributes
         checkpoint = torch.load(ops.join(self.args.save_path, f'best-val-{self.args.seed}.pt'))
-        if checkpoint['use_ntk']:
-            self.model = NTKModel()
-        elif checkpoint['kernel_type'] == 'laplace':
-            self.model = LaplaceRFM(device='cuda')
+        if checkpoint['kernel_type'] == 'laplace':
+            self.model = GenericRFM(kernel_obj=LaplaceKernel(bandwidth=checkpoint['bandwidth'], exponent=checkpoint['exponent']), 
+                                    device='cuda', reg=checkpoint['reg'], iters=checkpoint['iters'], 
+                                    diag=checkpoint['diag'])
         elif checkpoint['kernel_type'] == 'gen_laplace':
-            self.model = GeneralizedLaplaceRFM(device='cuda', exponent=checkpoint['exponent'])
+            self.model = GenericRFM(kernel_obj=ProductLaplaceKernel(bandwidth=checkpoint['bandwidth'], exponent=checkpoint['exponent']), 
+                                    device='cuda', reg=checkpoint['reg'], iters=checkpoint['iters'], 
+                                    diag=checkpoint['diag'])
         self.model.weights = checkpoint['weights']
         self.model.M = checkpoint['M']
         if checkpoint['sqrtM'] is not None:
             self.model.sqrtM = checkpoint['sqrtM']
         else:
-            self.model.sqrtM = matrix_sqrt(self.model.M)
+            self.model.sqrtM = matrix_power(self.model.M, checkpoint['agop_power'])
 
         self.model.bandwidth = checkpoint['bandwidth']
         self.args.cat_policy = checkpoint['cat_policy']

@@ -628,7 +628,7 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
 
         if args.model_type == 'rfm':
             config['model'].setdefault('use_feature_learning', True)
-            config['model'].setdefault('iters', 3)  
+            config['model'].setdefault('iters', 4)  
         elif args.model_type == 'kernel':
             config['model'].setdefault('use_feature_learning', False)
             config['model'].setdefault('iters', 0)
@@ -681,7 +681,7 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
         direction = 'minimize' if info['task_type'] == 'regression' else 'maximize'
         print("direction", direction)
         
-        sampler = optuna.samplers.TPESampler(seed=0)#, n_startup_trials=20)
+        sampler = optuna.samplers.TPESampler(seed=0)
         n_trials = args.n_trials
 
         method = get_method(args.model_type)(args, info['task_type'] == 'regression')      

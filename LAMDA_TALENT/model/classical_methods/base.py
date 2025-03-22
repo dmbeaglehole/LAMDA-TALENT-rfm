@@ -34,8 +34,6 @@ class classical_methods(object, metaclass=abc.ABCMeta):
         assert args.cat_policy != 'indices'
 
     def data_format(self, is_train = True, N = None, C = None, y = None):
-        print("formmating with cat_policy:", self.args.cat_policy)
-        print("normalization:", self.args.normalization)
         if is_train:
             self.N, self.C, self.num_new_value, self.imputer, self.cat_new_value = data_nan_process(self.N, self.C, self.args.num_nan_policy, self.args.cat_nan_policy)
             self.y, self.y_info, self.label_encoder = data_label_process(self.y, self.is_regression)
