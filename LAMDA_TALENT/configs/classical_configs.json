@@ -1,5 +1,5 @@
 {
-    "dataset": "Credit_c",
+    "dataset": "1000-Cameras-Dataset",
     "model_type": "rfm",
     "normalization": "standard",
     "num_nan_policy": "mean",

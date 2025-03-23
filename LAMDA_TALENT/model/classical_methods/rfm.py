@@ -125,8 +125,10 @@ class RFMMethod(classical_methods):
             return
         
         numerical_indices = torch.arange(num_numerical_features)
-        categorical_indices = []
+        if self.cat_encoder is None:
+            return numerical_indices, [], []
         
+        categorical_indices = []
         num_features_so_far = num_numerical_features+0
         for cats in self.cat_encoder.categories_:
             num_current_cat_features = len(cats)
@@ -215,7 +217,7 @@ class RFMMethod(classical_methods):
                 y_train = one_hot_encode(y_train, num_classes)
                 y_val = one_hot_encode(y_val, num_classes)
 
-        M_batch_size = 8192 if self.kernel_type=='laplace' else None
+        M_batch_size = 16384 if self.kernel_type=='laplace' else None
 
         if len(X_train) <= 75_000:
             # use lstsq for small datasets
@@ -303,7 +305,13 @@ class RFMMethod(classical_methods):
             'normalization': self.args.normalization,
             'diag': self.diag,
             'center_grads': self.center_grads,
-            'agop_power': self.agop_power
+            'agop_power': self.agop_power,
+            'cat_info': {
+                'handle_categorical': self.model.kernel_obj.handle_categorical,
+                'numerical_indices': numerical_indices,
+                'categorical_indices': categorical_indices,
+                'categorical_vectors': categorical_vectors
+            }
         }, ops.join(self.args.save_path, f'best-val-{self.args.seed}.pt'))
         
         del self.model
@@ -320,12 +328,10 @@ class RFMMethod(classical_methods):
         checkpoint = torch.load(ops.join(self.args.save_path, f'best-val-{self.args.seed}.pt'))
         if checkpoint['kernel_type'] == 'laplace':
             self.model = GenericRFM(kernel=LaplaceKernel(bandwidth=checkpoint['bandwidth'], exponent=checkpoint['exponent']), 
-                                    device='cuda', reg=checkpoint['reg'], iters=checkpoint['iters'], 
-                                    diag=checkpoint['diag'])
+                                    device='cuda')
         elif checkpoint['kernel_type'] == 'gen_laplace':
             self.model = GenericRFM(kernel=ProductLaplaceKernel(bandwidth=checkpoint['bandwidth'], exponent=checkpoint['exponent']), 
-                                    device='cuda', reg=checkpoint['reg'], iters=checkpoint['iters'], 
-                                    diag=checkpoint['diag'])
+                                    device='cuda')
         self.model.weights = checkpoint['weights']
         self.model.M = checkpoint['M']
         if checkpoint['sqrtM'] is not None:
@@ -333,10 +339,12 @@ class RFMMethod(classical_methods):
         else:
             self.model.sqrtM = matrix_power(self.model.M, checkpoint['agop_power'])
 
-        self.model.bandwidth = checkpoint['bandwidth']
         self.args.cat_policy = checkpoint['cat_policy']
         self.args.normalization = checkpoint['normalization']
-        self.model.diag = checkpoint['diag']
+
+        if checkpoint['cat_info']['handle_categorical']:
+            print("Setting categorical indices")
+            self.model.set_categorical_indices(checkpoint['cat_info']['numerical_indices'], checkpoint['cat_info']['categorical_indices'], checkpoint['cat_info']['categorical_vectors'])
 
         if self.C is None:
             assert self.N is not None

@@ -636,14 +636,14 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
         # Generate hash for this config
         config_hash = get_config_hash(config)
         
-        # Check if we have cached results
-        if config_hash in trial_cache:
-            print("Found cached result for this configuration")
-            cached_result = trial_cache[config_hash]
+        # # Check if we have cached results
+        # if config_hash in trial_cache:
+        #     print("Found cached result for this configuration")
+        #     cached_result = trial_cache[config_hash]
             
-            # Check if cached result is best so far
-            save_best_config(config, cached_result["result"], trial.number)
-            return cached_result["result"]
+        #     # Check if cached result is best so far
+        #     save_best_config(config, cached_result["result"], trial.number)
+        #     return cached_result["result"]
 
         try:
             print("Fitting method. Config:", config)
@@ -670,7 +670,6 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
         except Exception as e:
             print("ERROR", e)
             print(f"Full error traceback:\n{traceback.format_exc()}")
-            exit()
             return 1e9 if info['task_type'] == 'regression' else 0.0
 
     if osp.exists(best_params_path) and args.retune == False:
