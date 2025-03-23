@@ -226,18 +226,27 @@ class RFMMethod(classical_methods):
         total_points_to_sample = 20_000
         iters_to_use = self.model.iters
         if self.model.kernel_type == 'generic' and isinstance(self.model.kernel_obj, ProductLaplaceKernel):
-            if len(X_train) <= 10_000:
-                pass
-            elif len(X_train) <= 20_000 and X_train.shape[1] <= 1000:
-                total_points_to_sample = 10_000
-                iters_to_use = 4
-            elif len(X_train) <= 50_000 and X_train.shape[1] <= 2000:
-                total_points_to_sample = 5000
-                iters_to_use = 2
-            else:
-                total_points_to_sample = 1000
-                iters_to_use = 1
-            self.model.set_categorical_indices(numerical_indices, categorical_indices, categorical_vectors)
+            if X_train.shape[1] > 1000: # only handle cateogricals specially for high-dimensional data
+                if len(X_train) <= 10_000:
+                    # For smallest datasets: use default values
+                    pass
+                elif 10_000 < len(X_train) <= 20_000 and X_train.shape[1] <= 2000:
+                    # Medium-small datasets with moderate dimensionality
+                    total_points_to_sample = 10_000
+                    iters_to_use = 4
+                elif 20_000 < len(X_train) <= 50_000 and X_train.shape[1] <= 2000:
+                    # Medium-sized datasets with moderate dimensionality
+                    total_points_to_sample = 5000
+                    iters_to_use = 2
+                elif 10_000 < len(X_train) <= 20_000 and 2000 < X_train.shape[1] <= 3000:
+                    # Medium-small datasets with higher dimensionality
+                    total_points_to_sample = 5000
+                    iters_to_use = 2
+                else:
+                    # Largest datasets or highest dimensionality
+                    total_points_to_sample = 1000
+                    iters_to_use = 1
+                self.model.set_categorical_indices(numerical_indices, categorical_indices, categorical_vectors)
             
 
         tic = time.time()
