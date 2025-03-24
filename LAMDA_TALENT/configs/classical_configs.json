@@ -1,5 +1,5 @@
 {
-    "dataset": "Rain_in_Australia",
+    "dataset": "Credit_c",
     "model_type": "rfm",
     "normalization": "standard",
     "num_nan_policy": "mean",

@@ -15,6 +15,7 @@ if __name__ == '__main__':
     if args.tune:
         args = tune_hyper_parameters(args, opt_space, train_val_data, info)
 
+    print("args", args)
     best_iters = []
     ## Training Stage over different random seeds
     for seed in tqdm(range(args.seed_num)):

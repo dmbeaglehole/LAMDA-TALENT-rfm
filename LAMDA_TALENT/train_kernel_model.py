@@ -11,6 +11,7 @@ import numpy as np
 if __name__ == '__main__':
     results_list, time_list = [], []
     args, default_para, opt_space = get_classical_args()
+    args.model_type = 'kernel'
     train_val_data, test_data, info = get_dataset(args.dataset, args.dataset_path)
     if args.tune:
         args = tune_hyper_parameters(args, opt_space, train_val_data, info)
@@ -26,12 +27,12 @@ if __name__ == '__main__':
         results_list.append(vres)
         time_list.append(time_cost)
     show_results_classical(args, info, metric_name, results_list, time_list)
-    # with open(f"/u/dbeaglehole/LAMDA-TALENT-rfm/kernel_results/{args.dataset}-{args.model_type}.pkl", "wb") as f:
-    #     d = {
-    #         "info": info,
-    #         "args": args,
-    #         "results": results_list,
-    #         "time": time_list,
-    #         "metric_name": metric_name,
-    #     }
-    #     pickle.dump(d, f)
+    with open(f"/u/dbeaglehole/LAMDA-TALENT-rfm/kernel_results/{args.dataset}-{args.model_type}.pkl", "wb") as f:
+        d = {
+            "info": info,
+            "args": args,
+            "results": results_list,
+            "time": time_list,
+            "metric_name": metric_name,
+        }
+        pickle.dump(d, f)

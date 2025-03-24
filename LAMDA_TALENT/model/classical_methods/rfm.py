@@ -166,7 +166,6 @@ class RFMMethod(classical_methods):
         self.n_num_features, self.n_cat_features = self.D.n_num_features, self.D.n_cat_features
         if config:
             self.reset_stats_withconfig(config)
-        
         if 'model' in self.args.config:
             if 'cat_policy' in self.args.config['model']:
                 self.args.cat_policy = self.args.config['model']['cat_policy']
@@ -219,7 +218,8 @@ class RFMMethod(classical_methods):
         M_batch_size = 16384 if self.kernel_type=='laplace' else None
 
         iters_to_use = self.model.iters
-        agop_path = config['model']['agop_path']
+        agop_path = self.args.config['model']['agop_path']
+        sqrtM_loaded = False
         print("agop_path:", agop_path)
         if len(X_train) <= self.model.max_lstsq_size:
             # use lstsq for small datasets
@@ -233,7 +233,18 @@ class RFMMethod(classical_methods):
         else:
             fit_method = 'eigenpro'
             iters_to_use = 0
-            self.model.sqrtM = torch.load(agop_path)
+            if ops.exists(agop_path):
+                self.model.sqrtM = torch.load(agop_path)
+                sqrtM_loaded = True
+                print("Loaded sqrtM from:", agop_path)
+                if len(self.model.sqrtM.shape) == 1:
+                    assert self.model.diag == True
+                    print("sqrtM", self.model.sqrtM)
+                else:
+                    assert self.model.diag == False
+                    print("sqrtM", self.model.sqrtM.diag())
+            else:
+                print("agop_path does not exist:", agop_path)
 
         ep_epochs = 8
         total_points_to_sample = 20_000
@@ -285,7 +296,7 @@ class RFMMethod(classical_methods):
                         total_points_to_sample=total_points_to_sample,
                         iters=iters_to_use)
         
-        if train_on_subset:
+        if train_on_subset and self.model.sqrtM is not None and not sqrtM_loaded:
             torch.save(self.model.sqrtM, agop_path)
 
         self.trlog['best_iter'] = self.model.best_iter
@@ -308,14 +319,11 @@ class RFMMethod(classical_methods):
 
         time_cost = time.time() - tic
         # Save just the essential model attributes
-        if hasattr(self.model, 'sqrtM'):
-            sqrtM = self.model.sqrtM
-        else:
-            sqrtM = None
+
         torch.save({
             'weights': self.model.weights,
             'M': self.model.M,
-            'sqrtM': sqrtM,
+            'sqrtM': self.model.sqrtM,
             'bandwidth': self.model.kernel_obj.bandwidth if self.model.kernel_type == 'generic' else self.model.bandwidth,
             'is_classification': is_classification,
             'kernel_type': self.kernel_type,
@@ -353,10 +361,7 @@ class RFMMethod(classical_methods):
                                     device='cuda')
         self.model.weights = checkpoint['weights']
         self.model.M = checkpoint['M']
-        if checkpoint['sqrtM'] is not None:
-            self.model.sqrtM = checkpoint['sqrtM']
-        else:
-            self.model.sqrtM = matrix_power(self.model.M, checkpoint['agop_power'])
+        self.model.sqrtM = checkpoint['sqrtM']
 
         self.args.cat_policy = checkpoint['cat_policy']
         self.args.normalization = checkpoint['normalization']
