@@ -21,7 +21,7 @@ if __name__ == '__main__':
         args.seed = seed    # update seed  
         set_seeds(args.seed)
         method = get_method(args.model_type)(args, info['task_type'] == 'regression')
-        time_cost = method.fit(train_val_data, info, train=True)   
+        time_cost = method.fit(train_val_data, info, train=True, train_on_subset=False)   
         vres, metric_name, predict_logits = method.predict(test_data, info, model_name=args.evaluate_option)
         results_list.append(vres)
         time_list.append(time_cost)

@@ -1,5 +1,5 @@
 {
-    "dataset": "1000-Cameras-Dataset",
+    "dataset": "Rain_in_Australia",
     "model_type": "rfm",
     "normalization": "standard",
     "num_nan_policy": "mean",

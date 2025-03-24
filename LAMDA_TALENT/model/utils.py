@@ -628,6 +628,7 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
 
         if args.model_type == 'rfm':
             config['model'].setdefault('iters', 4)  
+            
         elif args.model_type == 'kernel':
             config['model'].setdefault('iters', 0)
 
@@ -636,19 +637,21 @@ def tune_hyper_parameters(args, opt_space, train_val_data, info, cache_path='/wo
         # Generate hash for this config
         config_hash = get_config_hash(config)
         
-        # # Check if we have cached results
-        # if config_hash in trial_cache:
-        #     print("Found cached result for this configuration")
-        #     cached_result = trial_cache[config_hash]
+        # Check if we have cached results
+        if config_hash in trial_cache:
+            print("Found cached result for this configuration")
+            cached_result = trial_cache[config_hash]
             
-        #     # Check if cached result is best so far
-        #     save_best_config(config, cached_result["result"], trial.number)
-        #     return cached_result["result"]
+            # Check if cached result is best so far
+            save_best_config(config, cached_result["result"], trial.number)
+            return cached_result["result"]
 
         try:
             print("Fitting method. Config:", config)
             info['trial'] = trial.number
-            method.fit(train_val_data, info, train=True, config=config)    
+            agop_path = osp.join(args.save_path, f'best-sqrtM-{trial.number}.pt')
+            config['model']['agop_path'] = agop_path
+            method.fit(train_val_data, info, train=True, config=config, train_on_subset=True)    
             result = method.trlog['best_res']
             
             # Cache the result

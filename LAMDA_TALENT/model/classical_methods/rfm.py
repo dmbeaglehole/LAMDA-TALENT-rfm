@@ -157,7 +157,7 @@ class RFMMethod(classical_methods):
 
         
 
-    def fit(self, data, info, train=True, config=None):
+    def fit(self, data, info, train=True, config=None, train_on_subset=True):
         N, C, y = data
         # if the method already fit the dataset, skip these steps (such as the hyper-tune process)
         self.D = Dataset(N, C, y, info)
@@ -201,7 +201,6 @@ class RFMMethod(classical_methods):
 
         is_classification = self.is_binclass or self.is_multiclass
         if is_classification:
-            print("Getting num classes")
             if 'n_classes' in info:
                 num_classes = info['n_classes']
             elif 'num_classes' in info:
@@ -219,15 +218,28 @@ class RFMMethod(classical_methods):
 
         M_batch_size = 16384 if self.kernel_type=='laplace' else None
 
-        if len(X_train) <= 75_000:
+        iters_to_use = self.model.iters
+        agop_path = config['model']['agop_path']
+        print("agop_path:", agop_path)
+        if len(X_train) <= self.model.max_lstsq_size:
             # use lstsq for small datasets
             fit_method = 'lstsq'
-        elif len(X_train) <= 100_000:
+        elif len(X_train) <= 100_000 and train_on_subset:
+            fit_method = 'lstsq'
+            random_indices = torch.randperm(len(X_train))[:self.model.max_lstsq_size]
+            X_train = X_train[random_indices]
+            y_train = y_train[random_indices]
+            print(f"Subsampling to max_lstsq_size: {self.model.max_lstsq_size}")
+        else:
             fit_method = 'eigenpro'
+            iters_to_use = 0
+            self.model.sqrtM = torch.load(agop_path)
 
+        ep_epochs = 8
         total_points_to_sample = 20_000
-        iters_to_use = self.model.iters
+        
         if self.model.kernel_type == 'generic' and isinstance(self.model.kernel_obj, ProductLaplaceKernel):
+            ep_epochs = 2
             if X_train.shape[1] > 1000: # only handle cateogricals specially for high-dimensional data
                 if len(X_train) <= 10_000:
                     # For smallest datasets: use default values
@@ -244,12 +256,19 @@ class RFMMethod(classical_methods):
                     # Medium-small datasets with higher dimensionality
                     total_points_to_sample = 5000
                     iters_to_use = 2
-                else:
+                elif X_train.shape[1] < 4000:
                     # Largest datasets or highest dimensionality
                     total_points_to_sample = 1000
                     iters_to_use = 1
+                else:
+                    # For highest dimensionality
+                    total_points_to_sample = 250
+                    iters_to_use = 1
                 self.model.set_categorical_indices(numerical_indices, categorical_indices, categorical_vectors)
-            
+
+        if len(X_train) >= 70_000:
+            # for large datasets, use fewer iterations for all kernel types
+            iters_to_use = min(iters_to_use, 2)
 
         tic = time.time()
         self.model.fit((X_train, y_train), 
@@ -260,16 +279,16 @@ class RFMMethod(classical_methods):
                         return_best_params=True,
                         bs=4096,
                         top_q=196,
-                        epochs=20,
-                        lr_scale=1.0,
+                        epochs=ep_epochs,
                         n_subsamples=16384,
                         verbose=True,
                         total_points_to_sample=total_points_to_sample,
                         iters=iters_to_use)
         
+        if train_on_subset:
+            torch.save(self.model.sqrtM, agop_path)
+
         self.trlog['best_iter'] = self.model.best_iter
-
-
         y_val_pred = self.model.predict(X_val).cpu()
 
         if self.is_binclass:

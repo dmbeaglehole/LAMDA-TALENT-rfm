@@ -1,25 +1,31 @@
 {
-    "kernel": {
+    "rfm": {
         "model": {
             "bandwidth": [
-                "float", 10, 1000
+                "float", 1, 200
             ],
             "reg": [
-                "float", 1e-5, 1e-1
+                "float", 1e-6, 1e0
             ],
             "exponent": [
-                "float", 1.0, 1.4
+                "float", 0.7, 1.4
+            ],
+            "cat_policy": [
+                "categorical", "ohe"
+            ],
+            "normalization": [
+                "categorical", "standard"
             ],
             "kernel_type": [
                 "categorical", "laplace"
             ],
-            "cat_policy": [
-                "categorical", "ordinal", "ohe"
+            "agop_power": [
+                "float", 0.5, 0.5
             ],
-            "normalization": [
-                "categorical", "minmax", "standard", "quantile"
+            "center_grads": [
+                "categorical", false
             ],
-            "use_ntk": [
+            "diag": [
                 "categorical", false
             ]
         },
